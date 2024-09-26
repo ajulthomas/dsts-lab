@@ -6,9 +6,10 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 import ast
 from sklearn.decomposition import PCA
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import mean_squared_error
 from sklearn.linear_model import SGDRegressor
+
 
 import warnings
 
@@ -29,7 +30,7 @@ def get_required_columns(df_model):
         "votes",
         "type",
         "subzone",
-        "rating_number",
+        "rating_text",
     ]
     df_model = df_model[req_cols]
     return df_model
@@ -37,41 +38,35 @@ def get_required_columns(df_model):
 
 # function to clean the data
 def clean_data(df_model):
-    # Convert string representation of lists to actual lists, for the cuisine column
-    df_model["cuisine"] = df_model["cuisine"].apply(lambda x: ast.literal_eval(x))
-    # Convert string representation of lists to actual lists, for the type column
-    # replace nan with empty list
-    df_model["type"] = df_model["type"].fillna("[]")
-    df_model["type"] = df_model["type"].apply(ast.literal_eval)
+
+    # copy the dataframe
+    df_model = df_model.copy()
+
+    # Convert string representation of lists to actual lists in the "cuisine" column using .loc[]
+    df_model.loc[:, "cuisine"] = df_model["cuisine"].apply(ast.literal_eval)
+
+    # Convert string representation of lists to actual lists in the "type" column, replacing NaN with empty lists, using .loc[]
+    df_model.loc[:, "type"] = df_model["type"].fillna("[]").apply(ast.literal_eval)
 
     # let's clean the subzones column
     # we will extract the last part of the subzone column seperated by commas, if any and remove trailing whitespaces
-    df_model["suburb"] = df_model["subzone"].str.split(",").str[-1]
+    df_model.loc[:, "suburb"] = df_model["subzone"].str.split(",").str[-1]
 
     # remove trailing whitespaces
-    df_model["suburb"] = df_model["suburb"].str.strip()
+    df_model.loc[:, "suburb"] = df_model["suburb"].str.strip()
 
     # drop the subzone column
     df_model.drop("subzone", axis=1, inplace=True)
 
-    # remove columns where rating number is not available
-    df_model = df_model.dropna(subset=["rating_number"])
+    # remove columns where rating text is not available
+    df_model = df_model.dropna(subset=["rating_text"])
     df_model = df_model.dropna(subset=["type"])
 
-    # calculate the IQR
-    Q1 = df_model["rating_number"].quantile(0.25)
-    Q3 = df_model["rating_number"].quantile(0.75)
-    IQR = Q3 - Q1
-
-    # calculate the lower and upper bounds
-    lower_bound = Q1 - 1.5 * IQR
-    upper_bound = Q3 + 1.5 * IQR
-
-    # remove the outliers
-    df_model = df_model[
-        (df_model["rating_number"] > lower_bound)
-        & (df_model["rating_number"] < upper_bound)
-    ]
+    # let's simplify the rating_text column into binary classes
+    # we will encode 'Good', 'Very Good', 'Excellent' as 1 and 'Average', 'Poor' as 0
+    df_model["rating_text"] = df_model["rating_text"].apply(
+        lambda x: 1 if x in ["Good", "Very Good", "Excellent"] else 0
+    )
 
     return df_model
 
@@ -99,8 +94,8 @@ def add_type_columns(df, top_types):
 # function to feature engineer the data
 def feature_engineer_data(df_model):
     # x and y split
-    X = df_model.drop("rating_number", axis=1)
-    y = df_model["rating_number"]
+    X = df_model.drop("rating_text", axis=1)
+    y = df_model["rating_text"]
 
     # test train split
     X_train, X_test, y_train, y_test = train_test_split(
@@ -219,9 +214,6 @@ def feature_engineer_data(df_model):
         X_train[key] = X_train["suburb"].apply(lambda x: 1 if x == suburb else 0)
         X_test[key] = X_test["suburb"].apply(lambda x: 1 if x == suburb else 0)
 
-    # check the shape of the data
-    X_train.shape, X_test.shape
-
     # drop the suburb column
     X_train = X_train.drop("suburb", axis=1)
     X_test = X_test.drop("suburb", axis=1)
@@ -248,7 +240,7 @@ def feature_engineer_data(df_model):
 
 
 # main function to perform the data cleaning and preprocessing
-def regression_model():
+def classifier_model():
 
     # load the data
     df = load_data("./data/zomato_df_final_data.csv")
@@ -262,35 +254,12 @@ def regression_model():
     # feature engineer the data
     X_train_pca, X_test_pca, y_train, y_test = feature_engineer_data(df_model)
 
-    # save the data
-    # X_train.to_csv("./data/X_train.csv", index=False)
-    # X_test.to_csv("./data/X_test.csv", index=False)
-
-    # y_train.to_csv("./data/y_train.csv", index=False)
-    # y_test.to_csv("./data/y_test.csv", index=False)
-
     # modelling
-    # linear regression model
-    model_regression_1 = LinearRegression().fit(X_train_pca, y_train)
+    # classifier model
+    model_classification_3 = LogisticRegression(max_iter=1000).fit(X_train_pca, y_train)
 
-    # predict the rating
-    y_train_pred = model_regression_1.predict(X_train_pca)
-    y_test_pred = model_regression_1.predict(X_test_pca)
+    # calculate the accuracy of the model
+    train_accuracy = model_classification_3.score(X_train_pca, y_train)
+    test_accuracy = model_classification_3.score(X_test_pca, y_test)
 
-    # build another model using gradient descent regression as the optimization algorithm
-    # linear regression model
-    model_regression_2 = SGDRegressor(learning_rate="constant", eta0=0.0001).fit(
-        X_train_pca, y_train
-    )
-
-    # predict the rating
-    y_train_pred2 = model_regression_2.predict(X_train_pca)
-    y_test_pred2 = model_regression_2.predict(X_test_pca)
-
-    # calculate MSE score for both the models
-    mse_test = mean_squared_error(y_test, y_test_pred)
-    mse_test2 = mean_squared_error(y_test, y_test_pred2)
-
-    print(f"Test MSE model_regression_1 : {mse_test}")
-    print("\n")
-    print(f"Test MSE model_regression_2 : {mse_test2}")
+    print("Test accuracy model_classification_3 : ", test_accuracy)
