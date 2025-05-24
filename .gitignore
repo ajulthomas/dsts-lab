@@ -1,1 +1,6 @@
 **/*.csv
+**.*.zip
+**/*.twbr
+
+__pycache__/*
+*.pyc
